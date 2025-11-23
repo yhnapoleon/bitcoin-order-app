@@ -1,0 +1,81 @@
+name: Bitcoin order App
+on:
+  push:
+    branches:
+      - githubcicd  # 监听 githubcicd 分支的推送
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [16.x] # 指定 Node.js 版本
+
+    steps:
+      - uses: actions/checkout@v2
+      
+      - uses: browser-actions/setup-chrome@latest # 安装 Chrome 用于测试
+      
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v1
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      # 缓存 node_modules 以加速构建
+      - name: Cache node modules
+        id: cache-nodemodules
+        uses: actions/cache@v3
+        env:
+          cache-name: cache-node-modules
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-
+
+      # 安装依赖
+      - name: Install Dependencies
+        if: steps.cache-nodemodules.outputs.cache-hit != 'true'
+        run: |
+          npm ci --force
+
+      # 构建项目
+      - name: Build
+        run: |
+          npm run build --force
+
+      # 代码风格检查
+      - name: Lint
+        run: |
+          npm run lint
+      
+      # 更新类型定义（修复潜在构建问题）
+      - name: Update types to latest
+        run: |
+          npm install --save-dev @types/node@latest --force
+
+      # 生成变更日志 (Changelog)
+      - name: Conventional Changelog Action
+        id: changelog
+        uses: TriPSs/conventional-changelog-action@v3
+        with:
+          github-token: ${{ secrets.WORKSHOP6_GITHUB_TOKEN }}
+          output-file: "false"
+
+      # 创建 GitHub Release
+      - name: Create Release
+        uses: actions/create-release@v1
+        if: ${{ steps.changelog.outputs.skipped == 'false' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.WORKSHOP6_GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.changelog.outputs.tag }}
+          release_name: ${{ steps.changelog.outputs.tag }}
+          body: ${{ steps.changelog.outputs.clean_changelog }}
+
+      # 部署到 GitHub Pages
+      - name: Deploy
+        run: |
+          npm run deploy
